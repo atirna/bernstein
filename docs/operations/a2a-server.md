@@ -187,6 +187,16 @@ signature — so a tampered descriptor is rejected without contacting the node.
 The provenance key is minted once and reused (persisted beside the card), so
 republishing an unchanged node rewrites byte-identical descriptor bytes.
 
+Cards expire after 24 hours. `publish` re-issues an expired card from its own
+claims (issuer, tools, policies) on the key persisted beside the card, so both
+the fingerprint and the claims survive each validity window. The key file must
+match the card: if it is missing or belongs to a different card, publish refuses
+rather than minting a new identity — re-issue deliberately with
+`bernstein interop a2a card --private-key <key>.pem`. A card is re-issued only
+once it is past its `expires_at`, so a publish shortly before expiry sends the
+card as-is and the next run after expiry re-issues it; schedule republication
+with that in mind.
+
 ## Related
 
 - [Signed A2A message receipts](a2a-message-receipts.md)
