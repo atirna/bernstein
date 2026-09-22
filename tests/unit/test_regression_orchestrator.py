@@ -494,6 +494,68 @@ class TestRetryEscalation:
         assert result is False
         quarantine.record_failure.assert_called_once()
 
+    def test_max_retries_exhausted_records_failure_summary(self) -> None:
+        """The task's own failure summary reaches the quarantine store."""
+        task = _make_task(
+            id="T-disk",
+            title="lens-5-cleanliness",
+            status="failed",
+        )
+        task.retry_count = 2
+        task.max_retries = 2
+        task.result_summary = (
+            "Spawn failed 3 consecutive times (ResourceExhaustedError): "
+            "Resource exhausted: Disk space critical: 0.3 GB free (need >= 1.0 GB)"
+        )
+        retried: set[str] = set()
+        quarantine = MagicMock()
+        quarantine.is_quarantined.return_value = False
+
+        result = maybe_retry_task(
+            task,
+            retried_task_ids=retried,
+            max_task_retries=2,
+            client=MagicMock(),
+            server_url="http://test",
+            quarantine=quarantine,
+        )
+        assert result is False
+        quarantine.record_failure.assert_called_once_with("lens-5-cleanliness", task.result_summary, task_id="T-disk")
+
+    def test_excused_title_records_nothing_and_logs_no_recorded_line(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """maybe_retry_task against a real store: an excused title is not recorded."""
+        from bernstein.core.security.quarantine import QuarantineStore
+
+        store = QuarantineStore(tmp_path / "quarantine.json")
+        store.excuse_failure(
+            "T-disk",
+            "host resource exhaustion during spawn: SpawnError: Disk space critical: 0.3 GB free (need >= 1.0 GB)",
+        )
+        task = _make_task(id="T-disk", title="lens-5-cleanliness", status="failed")
+        task.retry_count = 2
+        task.max_retries = 2
+        task.result_summary = (
+            "Spawn failed 3 consecutive times (unknown): backend: Disk space critical: 0.3 GB free (need >= 1.0 GB)"
+        )
+        retried: set[str] = set()
+
+        with caplog.at_level("WARNING"):
+            result = maybe_retry_task(
+                task,
+                retried_task_ids=retried,
+                max_task_retries=2,
+                client=MagicMock(),
+                server_url="http://test",
+                quarantine=store,
+            )
+        assert result is False
+        assert store.load() == []
+        assert not store.is_quarantined("lens-5-cleanliness")
+        assert "recorded cross-run failure" not in caplog.text
+        assert "excused" in caplog.text
+
     def test_high_stakes_role_gets_opus_max(self) -> None:
         """Architect/security roles always get opus/max on any retry."""
         task = _make_task(
