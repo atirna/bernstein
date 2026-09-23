@@ -22,5 +22,11 @@ exemption is decided from the orchestrator's own observation, not from
 a task. The condition recovers
 with the machine; a task that failed for its own reasons still quarantines
 exactly as before, and retry exhaustion remains terminal for the lineage
-within the run. Existing entries from a past outage can be cleared with
-`bernstein quarantine clear` (#5963).
+within the run. If the excused-marker write itself fails — on the same full
+disk that triggered it — the give-up branch logs a warning and still parks
+and fails the batch rather than aborting the tick. One trust boundary widened
+on purpose: the recorded reason now comes from `task.result_summary` where it
+used to be the constant `Max retries exhausted`, so `.sdd/runtime/quarantine.json`
+and the `bernstein quarantine list` Reason column carry agent-authored text;
+the listing escapes it so it renders, never parses. Existing entries from a
+past outage can be cleared with `bernstein quarantine clear` (#5963).

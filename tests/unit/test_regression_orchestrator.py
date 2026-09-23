@@ -10,8 +10,10 @@ All HTTP communication and subprocess spawning is mocked.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import httpx
@@ -32,6 +34,7 @@ from bernstein.core.router import ModelConfig as RouterModelConfig
 from bernstein.core.spawner import AgentSpawner
 from bernstein.core.task_lifecycle import (
     check_file_overlap,
+    claim_and_spawn_batches,
     collect_completion_data,
     maybe_retry_task,
 )
@@ -1421,3 +1424,36 @@ class TestBacklogIngestion:
         # The backlog task should have been posted to the server
         assert len(posted_payloads) >= 1
         assert any(p.get("title") == "Backlog task" for p in posted_payloads)
+
+
+def test_excuse_marker_write_failure_still_parks_and_fails_the_batch(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A marker write that itself fails must not strand the batch.
+
+    The excused-marker sidecar write runs exactly when the host is out of
+    disk or file descriptors, so its OSError must degrade to a warning and
+    the give-up branch must still park and fail the tasks.
+    """
+    from tests.unit.tasks.test_task_lifecycle import _claim_orch
+
+    task = _make_task(id="task123", title="fill the disk")
+    task.metadata = {}
+    task.approval_spec = None
+    task.tenant_id = "default"
+
+    def _unwritable_marker(_task_id: str, _reason: str) -> None:
+        raise OSError(28, "No space left on device")
+
+    quarantine = SimpleNamespace(is_quarantined=lambda _t: False, excuse_failure=_unwritable_marker)
+    orch = _claim_orch(tmp_path, quarantine)
+    orch._spawner.spawn_for_tasks.side_effect = OSError(28, "No space left on device")
+    orch._spawn_failures = {frozenset({"task123"}): (2, 0.0)}
+    result = TickResult()
+
+    with caplog.at_level(logging.WARNING):
+        claim_and_spawn_batches(orch, [[task]], alive_count=0, assigned_task_ids=set(), done_ids=set(), result=result)
+
+    assert "Could not excuse tasks after host resource exhaustion" in caplog.text
+    fail_calls = [call for call in orch._client.post.call_args_list if call.args[0].endswith("/tasks/task123/fail")]
+    assert len(fail_calls) == 1

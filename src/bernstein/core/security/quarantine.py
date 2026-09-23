@@ -174,8 +174,10 @@ class QuarantineStore:
         """Return True when *task_id* carries a current excused marker.
 
         The spawn loop excuses the tasks it gave up spawning after the host
-        ran out of resources; a marker expires after
-        ``QUARANTINE_EXPIRY_DAYS`` so the file stays bounded. Keyed by task
+        ran out of resources; a marker expires on the same boundary as an
+        entry (``_is_expired``), so the excuse always outlives the entry it
+        excuses and there is no day where a live entry records again with
+        its marker already gone. Keyed by task
         id, not title: only the tasks the spawn loop actually failed are
         excused, so a later task under the same title that fails for its own
         reasons still counts toward quarantine.
@@ -193,7 +195,7 @@ class QuarantineStore:
             recorded = date.fromisoformat(str(record.get("recorded_at") or ""))
         except ValueError:
             return False
-        return (date.today() - recorded).days < QUARANTINE_EXPIRY_DAYS
+        return (date.today() - recorded) <= timedelta(days=QUARANTINE_EXPIRY_DAYS)
 
     # ------------------------------------------------------------------
     # Write

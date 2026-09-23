@@ -3111,8 +3111,11 @@ def claim_and_spawn_batches(
             if new_count >= orch._MAX_SPAWN_FAILURES or not should_retry:
                 # Classify the caught exception, not agent-writable task.result_summary.
                 if is_transient_host_failure(str(exc)):
-                    for task in batch:
-                        orch._quarantine.excuse_failure(task.id, f"host resource exhaustion during spawn: {exc}")
+                    try:
+                        for task in batch:
+                            orch._quarantine.excuse_failure(task.id, f"host resource exhaustion during spawn: {exc}")
+                    except Exception:
+                        logger.warning("Could not excuse tasks after host resource exhaustion", exc_info=True)
                 # The analyzer can call it quits before the budget is
                 # spent. Park explicitly so the two ways of giving up
                 # leave the same operator-visible state.

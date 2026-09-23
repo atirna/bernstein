@@ -159,7 +159,11 @@ def test_excused_marker_expires_like_an_entry(tmp_path: Path) -> None:
     store.excuse_failure("T-stale-1", "host resource exhaustion during spawn: no space left on device")
     excused_file = tmp_path / "quarantine.excused.json"
     stale = json.loads(excused_file.read_text())
+    # an entry stays live until strictly past the window, so the marker must cover the edge
     stale["T-stale-1"]["recorded_at"] = _days_ago(QUARANTINE_EXPIRY_DAYS)
+    excused_file.write_text(json.dumps(stale))
+    assert store.is_excused("T-stale-1") is True
+    stale["T-stale-1"]["recorded_at"] = _days_ago(QUARANTINE_EXPIRY_DAYS + 1)
     excused_file.write_text(json.dumps(stale))
     assert store.is_excused("T-stale-1") is False
     assert store.record_failure("old-title", "Agent died", task_id="T-stale-1") is True
